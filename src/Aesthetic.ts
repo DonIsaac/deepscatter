@@ -1,4 +1,8 @@
 /* eslint-disable no-underscore-dangle */
+/**
+ * Abstractions for mapping of data onto coordinates
+ * could be colors, transformations, etc.
+ */
 import { range as arange, extent, shuffler } from 'd3-array';
 import { randomLcg } from 'd3-random';
 import {

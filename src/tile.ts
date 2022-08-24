@@ -78,12 +78,12 @@ export abstract class Tile {
       return false;
     }
 
-    const c = this.extent;
+    const { x, y } = this.extent;
     return (
-      !(c.x[0] > viewport_limits.x[1]
-        || c.x[1] < viewport_limits.x[0]
-        || c.y[0] > viewport_limits.y[1]
-        || c.y[1] < viewport_limits.y[0]));
+      !(x[0] > viewport_limits.x[1]
+        || x[1] < viewport_limits.x[0]
+        || y[0] > viewport_limits.y[1]
+        || y[1] < viewport_limits.y[0]));
   }
 
   get tileWorker() : TileWorker {

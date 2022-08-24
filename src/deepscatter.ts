@@ -1,5 +1,5 @@
-import { select, Selection } from 'd3-selection';
-import { geoPath, geoIdentity } from 'd3-geo';
+import { BaseType, select, Selection } from 'd3-selection';
+import { geoPath, geoIdentity, GeoPermissibleObjects } from 'd3-geo';
 import { max, range } from 'd3-array';
 import merge from 'lodash.merge';
 import Zoom from './interaction';
@@ -7,6 +7,7 @@ import { ReglRenderer } from './regl_rendering';
 import { Dataset } from './Dataset';
 import { APICall } from './types';
 import { StructRowProxy } from 'apache-arrow';
+import type { Tile } from './tile';
 
 // DOM elements that deepscatter uses.
 const base_elements = [
@@ -41,6 +42,7 @@ export default class Scatterplot {
   ready : Promise<void>;
   public click_handler : ClickFunction;
   public tooltip_handler : TooltipHTML;
+  elements: Selection<HTMLDivElement, any, any, any>[] | undefined;
 
   constructor(selector : string, width : number, height: number) {
     this.bound = false;
@@ -130,12 +132,14 @@ export default class Scatterplot {
 
     // Needs the zoom built as well.
 
-    const bkgd = select('#container-for-canvas-2d-background').select('canvas');
-    const ctx = bkgd.node().getContext('2d');
+    const bkgd = select('#container-for-canvas-2d-background').select<HTMLCanvasElement>('canvas');
+    const ctx = bkgd.node()?.getContext('2d');
+    if (!ctx) throw new Error('Could not resolve 2d rendering context from canvas');
 
     ctx.fillStyle = prefs.background_color || 'rgba(133, 133, 111, .8)';
     ctx.fillRect(0, 0, window.innerWidth * 2, window.innerHeight * 2);
 
+    // FIXME(don): Does this need to be awaited?
     this._renderer.initialize();
 
     this.ready = this._root.promise;
@@ -174,8 +178,8 @@ export default class Scatterplot {
   */
   visualize_tiles() {
     const map = this;
-    const ctx = map.elements[2]
-      .selectAll('canvas').node().getContext('2d');
+    const ctx = map.elements?.[2]?.selectAll<HTMLCanvasElement, unknown>('canvas')?.node()?.getContext('2d');
+    if (!ctx) throw new Error('Could not get 2d rendering context from canvas');
 
     ctx.clearRect(0, 0, 10_000, 10_000);
     const { x_, y_ } = map._zoom.scales();
@@ -258,7 +262,7 @@ export default class Scatterplot {
       this.click_function = Function('datum', prefs.click_function);
     }
     if (prefs.tooltip_html) {
-      this.tooltip_html = Function('datum', prefs.tooltip_html);
+      this.tooltip_html = Function('datum', prefs.tooltip_html) as (arg0: StructRowProxy<any>) => string;
     }
     
     this.update_prefs(prefs);
@@ -348,9 +352,9 @@ export default class Scatterplot {
     return p;
   }
 
-  drawContours(contours, drawTo) {
+  drawContours<E extends HTMLElement>(contours: GeoPermissibleObjects[], drawTo: Selection<BaseType, any, any, any> | undefined) {
     const drawTwo = drawTo || select('body');
-    const canvas = drawTwo.select('#canvas-2d');
+    const canvas = drawTwo.select<HTMLCanvasElement>('#canvas-2d');
     const context : CanvasRenderingContext2D = canvas.node().getContext('2d');
 
     for (const contour of contours) {

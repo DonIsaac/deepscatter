@@ -64,7 +64,7 @@ export abstract class Dataset<T extends Tile> {
 
     const stack : T[] = [this.root_tile];
     const after_stack = [];
-    let current;
+    let current: T | undefined;
     while (current = stack.shift()) {
       if (!after) {
         callback(current);

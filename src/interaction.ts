@@ -1,5 +1,5 @@
 /* eslint-disable no-underscore-dangle */
-import { select } from 'd3-selection';
+import { BaseType, select } from 'd3-selection';
 import { timer } from 'd3-timer';
 import { zoom, zoomIdentity } from 'd3-zoom';
 import { mean } from 'd3-array';
@@ -10,7 +10,10 @@ import type { Renderer } from './rendering';
 import type QuadtreeRoot from './tile';
 import { ReglRenderer } from './regl_rendering';
 import Scatterplot from './deepscatter';
-import { StructRow } from 'apache-arrow';
+import { StructRow, StructRowProxy } from 'apache-arrow';
+import type { Tile } from './tile';
+import { assert } from './util';
+import { drag } from 'd3';
 
 
 export default class Zoom {
@@ -26,6 +29,7 @@ export default class Zoom {
   public transform : d3.ZoomTransform;
   public _start : number;
   public scatterplot : Scatterplot;
+  private _initialized = false;
   constructor(selector: string, prefs: APICall, plot : Scatterplot) {
     // There can be many canvases that display the zoom, but
     // this is initialized with the topmost most one that
@@ -126,6 +130,12 @@ export default class Zoom {
   }
 
   initialize_zoom() {
+    if (this._initialized) {
+      // FIXME: this shouldn't be called but it is
+      console.warn('Zoom already initialized');
+      return;
+    }
+    this._initialized = true;
     const { width, height, canvas } = this;
     this.transform = zoomIdentity;
 
@@ -145,13 +155,49 @@ export default class Zoom {
   }
 
   add_mouseover() {
+    let label_set: d3.Selection<BaseType | SVGCircleElement, StructRowProxy<any>, BaseType, unknown> | undefined;
     let last_fired = 0;
-    //@ts-ignore Not sure how to guarantee this formally.
-    const renderer : ReglRenderer = this.renderers.get('regl');
+    // const drag_state: DragState = {
+    //   dragging: false,
+    //   drag_start: -1,    // unix timestamp, -1 when not dragging
+    //   target: undefined, // point being dragged
+    //   click_delay_threshold: 250
+    // };
+    const drag_state = new DragState(250, 50);
+    const renderer = this.renderers.get('regl') as ReglRenderer<Tile>;
     const x_aes = renderer.aes.dim('x').current;
     const y_aes = renderer.aes.dim('y').current;
 
-    this.canvas.on('mousemove', (event) => {
+    const on_mouse_up = (event: MouseEvent) => {
+      console.log('mouse up:', event.target);
+
+      // dragging starts when the user starts a click. If the user releases
+      // their mouse button, then just this function should be called and
+      // dragging should be true
+      if (!drag_state.dragging) {
+        return;
+      }
+
+
+      // Some handlers won't provide a current data point, so use the one
+      // stored in the click state.
+      const datum = drag_state.target;
+      assert(datum, 'clicked point is undefined. This is a bug.');
+
+      // true if drag, false if click
+      const did_drag = drag_state.stop([event.layerX, event.layerY]);
+      if (!did_drag) {
+        console.log('click', datum,ix);
+        this.scatterplot.click_function(datum);
+      } else {
+        console.log('drag', datum.ix);
+        // todo
+      }
+    };
+
+    this.canvas.on('pointerup', on_mouse_up);
+    this.canvas.on('mousemove', (event: MouseEvent) => {
+      event.preventDefault();
       // Debouncing this is really important, it turns out.
       if (Date.now() - last_fired < 1000 / 20) {
         return;
@@ -183,7 +229,7 @@ export default class Zoom {
 
       this.html_annotation(annotations);
 
-      const labelSet = select('#deepscatter-svg')
+      labelSet = select('#deepscatter-svg')
         .selectAll('circle.label')
         .data(data, (d_) => d_.ix)
         .join(
@@ -197,10 +243,44 @@ export default class Zoom {
             .attr('cy', (datum) => y_(y_aes.value_for(datum))),
           (update) => update
             .attr('fill', (dd) => this.renderers.get('regl').aes.dim('color').current.apply(dd)),
-          (exit) => exit.call((e) => e.remove())
+          (exit) => exit.call((e) => {
+            if (e.size() && drag_state.dragging) {
+              const is_drag = drag_state.stop([event.layerX, event.layerY]);
+              if (is_drag) {
+                console.log('exit drag');
+              } else {
+                console.log('exit click');
+              }
+            }
+            e.remove();
+          })
         )
-        .on('click', (ev, dd) => {
+        .on('click', (ev, dd: StructRowProxy) => {
+          console.log('svg click');
           this.scatterplot.click_function(dd);
+        })
+        .on('pointerdown', (ev: MouseEvent, dd: StructRowProxy) => {
+          console.log('svg mousedown');
+          // drag_state.dragging = true;
+          // drag_state.drag_start = Date.now();
+          // drag_state.target;
+          drag_state.start(dd, [ev.layerX, ev.layerY]);
+          // console.log('mousedown');
+          // console.log(ev);
+          // console.log(dd);
+          return true;
+        })
+        .on('pointerup', (ev: MouseEvent, dd: StructRowProxy) => {
+          console.log('svg mouseup')
+          assert(drag_state.target && dd.ix === drag_state.target.ix);
+          // true if drag, false if click
+          const did_drag = drag_state.stop([ev.layerX, ev.layerY]);
+          if (!did_drag) {
+            this.scatterplot.click_function(dd);
+          } else {
+            console.log('drag');
+            // todo
+          }
         });
     });
   }
@@ -400,3 +480,137 @@ export function window_transform(x_scale : ScaleLinear, y_scale) {
 
   return m1;
 }
+
+// Ideally this would be in another file, but that would start me down the
+// rabbit hole of re-organizing the file structure of this codebase.
+class DragState<T extends StructRowProxy = StructRowProxy> {
+
+  /**
+   * `true` when a point is actively being dragged. This is set once a user
+   * clicks and holds down on a point, and is returned to `false` when they
+   * release it.
+   * 
+   * If a user quickly clicks and releases, it is not considered a drag, but
+   * instead a click event.
+   */
+  private _dragging: boolean;
+
+  /**
+   * UNIX timestamp of when dragging started. -1 when {@link DragState#_dragging}
+   * is `false`.
+   */
+  private _drag_start: number;
+
+  /**
+   * The point that is being dragged. `undefined` when
+   * {@link DragState#_dragging} is `false`.
+   */
+  target: T | undefined;
+
+  /**
+   * Where the click occurred. Usually in screen/layer space.
+   */
+  click_location: Point | undefined;
+
+  /**
+   * Amount of time, in MS, that must occur between mousedown and mouseup before
+   * a "click" is considered a "drag".
+   */
+  readonly click_delay_threshold: number;
+
+  /**
+   * If the distance between the mouseup and mousedown is greater than this
+   * distance, then the event combination is considered a "drag" and not a
+   * "click" no matter how quickly the two events occur.
+   */
+  readonly distance_threshold: number;
+
+  constructor(click_delay_threshold: number, distance_threshold: number) {
+    this.click_delay_threshold = click_delay_threshold;
+    this.distance_threshold = distance_threshold;
+    this._dragging = false;
+    this._drag_start = -1;
+  }
+
+  /**
+   * Called when the user has started to drag a point.
+   * 
+   * @param target The point being dragged
+   */
+  public start(target: T, mouse_down_location: Point): void {
+    this._dragging = true;
+    this._drag_start = Date.now();
+    this.target = target;
+    this.click_location = mouse_down_location;
+  }
+
+  /**
+   * Called when the user has released the mouse and therefore stopped dragging
+   * a point.
+   * 
+   * @returns `true` if the mouse down + mouse up event combination should
+   * be considered a drag, `false` otherwise.
+   */
+  public stop(_mouse_up_location: Point): boolean {
+    assert(this._dragging, 'Cannot stop a drag that has not started.');
+
+    // Mouse down is held for longer than threshold, so this is a drag.
+    // const is_long_click = this.drag_duration >= this.click_delay_threshold;
+    // if (is_long_click) {
+    //   this.reset();
+    //   return true
+    // }
+
+    // Mouse down and up are close enough together to be considered a click.
+    assert(this.click_location);
+    const distance = distance_between_points(this.click_location, _mouse_up_location);
+    const are_events_distant = distance >= this.distance_threshold;
+    if (are_events_distant) {
+      this.reset();
+      return true;
+    }
+
+    // Mouse down and up are close enough together in time and space to be
+    // considered a click.
+    return false;
+  }
+
+  private reset() {
+    this._dragging = false;
+    this._drag_start = -1;
+    this.target = undefined;
+    this.click_location = undefined;
+  }
+
+  /**
+   * `true` when a point is actively being dragged. This is set once a user
+   * clicks and holds down on a point, and is returned to `false` when they
+   * release it.
+   * 
+   * If a user quickly clicks and releases, it is not considered a drag, but
+   * instead a click event.
+   */
+  public get dragging(): boolean {
+    return this._dragging;
+  }
+
+  /**
+   * The amount of time the point has been dragged for. `-1` while not dragging.
+   */
+  public get drag_duration(): number {
+    return this._dragging
+      ? Date.now() - this._drag_start
+      : -1;
+  }
+}
+
+/**
+ * TODO(don): Move this to a separate file, so that all geometry/point code
+ * can be co-located.
+ * 
+ * @param p1 first point
+ * @param p2 second point
+ * @returns euclidean distance between the two points
+ */
+const distance_between_points = (p1: Point, p2: Point) => 
+  Math.sqrt(Math.pow(p1[0] - p2[0], 2) + Math.pow(p1[1] - p2[1], 2));

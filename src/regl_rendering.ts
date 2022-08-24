@@ -17,14 +17,14 @@ import { Dataset } from './Dataset';
 import { Frame } from '@playwright/test';
 
 // eslint-disable-next-line import/prefer-default-export
-export class ReglRenderer extends Renderer {
+export class ReglRenderer<T extends Tile> extends Renderer {
   public regl : Regl;
   public aes : AestheticSet;
   public buffer_size = 1024 * 1024 * 64;
   public canvas? : d3.Selection<HTMLCanvasElement, any, any, any>;
   public _buffers : MultipurposeBufferSet;
   public _initializations : Promise<void>[];
-  public tileSet : Dataset;
+  public tileSet : Dataset<T>;
   public zoom : Zoom;
   public _zoom : Zoom;
   public _start : number;
@@ -126,7 +126,7 @@ export class ReglRenderer extends Renderer {
     const { prefs } = this;
     const { transform } = this.zoom;
     const { aes_to_buffer_num, buffer_num_to_variable, variable_to_buffer_num } = this.allocate_aesthetic_buffers();
-    console.log(prefs.arrow_table);
+    // console.log(prefs.arrow_table);
     const props = {
     // Copy the aesthetic as a string.
       aes: { encoding: this.aes.encoding },
@@ -160,7 +160,7 @@ export class ReglRenderer extends Renderer {
     };
 
     // Clone.
-    return JSON.parse(JSON.stringify(props));
+    return JSON.parse(JSON.stringify(props)) as typeof props;
   }
 
   get default_webgl_scale() {
@@ -972,7 +972,7 @@ class TileBufferManager {
         // It's in the process of being built.
         console.log('Building', key);
         return false;
-      } if (current === undefined) {
+      } else if (current === undefined) {
         if (!this.tile.ready) {
         // Can't build b/c no tile ready.
           return false;
@@ -1114,15 +1114,8 @@ class MultipurposeBufferSet {
     );
   }
 
-  /**
-   * 
-   * @param items The number of datapoints in the arrow column being allocated
-   * @param bytes_per_item The number of bytes per item in the arrow column being allocated
-   * @returns 
-   */
-
-  allocate_block(items: number, bytes_per_item: number) {
-    // Call dibs on a block of this buffer.
+  allocate_block(items, bytes_per_item : number) {
+    // Allocate a block of this buffer.
     // NB size is in **bytes**
     if (this.pointer + items * bytes_per_item > this.buffer_size) {
     // May lead to ragged ends. Could be smarter about reallocation here,

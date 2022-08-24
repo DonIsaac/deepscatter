@@ -117,7 +117,7 @@ export class Renderer {
   public zoom : Zoom;
   public aes : AestheticSet;
   public _zoom : Zoom;
-  public _initializations : Promise<any>[];
+  public _initializations : Promise<any>[] | undefined;
   public render_props : RenderProps;
   constructor(selector, tileSet, scatterplot) {
     this.scatterplot = scatterplot;
@@ -219,7 +219,9 @@ export class Renderer {
 
   async initialize() {
     // Asynchronously wait for the basic elements to be done.
-    await this._initializations;
+    if (this._initializations?.length) {
+      await Promise.all(this._initializations);
+    }
     this.zoom.restart_timer(500_000);
   }
 }

@@ -26,7 +26,7 @@ export class AestheticSet {
     return this;
   }
 
-  public dim(aesthetic : string) {
+  public dim(aesthetic : string): StatefulAesthetic<any> {
     // Returns the stateful aesthetic corresponding to the given aesthetic.
     if (this.store[aesthetic]) {
       return this.store[aesthetic];

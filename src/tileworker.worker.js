@@ -25,6 +25,12 @@ function dictVector(input, id) {
 
 const WorkerTile = {
 
+  /**
+   * 
+   * @param {String} url 
+   * @param {*} mutations 
+   * @returns 
+   */
   fetch(url, mutations) {
     if (url.match('https://github')) {
       url += '?raw=true';
@@ -34,13 +40,18 @@ const WorkerTile = {
       .then((response) => {
         const table = tableFromIPC(response);
         const { metadata } = table.schema;
-        let buffer;
+
+        // let buffer;
+        // // For now, always mutate to ensure dict indexes are cast.
+        // if (Object.keys(mutations).length || true) {
+        //   buffer = mutate(mutations, response, metadata);
+        // } else {
+        //   buffer = response;
+        // }
         // For now, always mutate to ensure dict indexes are cast.
-        if (Object.keys(mutations).length || true) {
-          buffer = mutate(mutations, response, metadata);
-        } else {
-          buffer = response;
-        }
+        const buffer = (Object.keys(mutations).length > 0 || true)
+          ? mutate(mutations, response, metadata)
+          : response;
         const codes = get_dictionary_codes(buffer);
         return [transfer(buffer, [buffer]), metadata, codes];
       });
@@ -53,9 +64,17 @@ const WorkerTile = {
   },
 };
 
+/**
+ * 
+ * @param {ArrayBufferLike} buffer 
+ * @returns 
+ */
 function get_dictionary_codes(buffer) {
   // Too expensive to do on the client.
   const table = tableFromIPC(buffer);
+  /**
+   * @type {Record<string, Map<number, any>>}
+   */
   const dicts = {};
   for (const field of table.schema.fields) {
     if (field.type.dictionary) {
@@ -74,9 +93,19 @@ function get_dictionary_codes(buffer) {
   return dicts;
 }
 
+/**
+ * 
+ * @param {Record<string, string>} map 
+ * @param {ArrayBufferLike} table_buffer 
+ * @param {any?} metadata 
+ * @returns 
+ */
 function mutate(map, table_buffer, metadata) {
   const table = tableFromIPC(table_buffer);
   const data = new Map();
+  /**
+   * @type {Map<string, Function>}
+   */
   const funcmap = new Map();
 
   for (const [k, v] of Object.entries(map)) {
@@ -94,6 +123,9 @@ function mutate(map, table_buffer, metadata) {
     i++;
   }
 
+  /**
+   * @type {Record<string, Vector<any> | null>}
+   */
   const columns = {};
 
   // First, populate the old columns
