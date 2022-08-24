@@ -155,7 +155,7 @@ export default class Zoom {
   }
 
   add_mouseover() {
-    let label_set: d3.Selection<BaseType | SVGCircleElement, StructRowProxy<any>, BaseType, unknown> | undefined;
+    // let label_set: d3.Selection<BaseType | SVGCircleElement, StructRowProxy<any>, BaseType, unknown> | undefined;
     let last_fired = 0;
     // const drag_state: DragState = {
     //   dragging: false,
@@ -229,7 +229,7 @@ export default class Zoom {
 
       this.html_annotation(annotations);
 
-      labelSet = select('#deepscatter-svg')
+      let labelSet = select('#deepscatter-svg')
         .selectAll('circle.label')
         .data(data, (d_) => d_.ix)
         .join(
